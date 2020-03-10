@@ -1,5 +1,5 @@
 
-set(PROJECT_NAME "ismallpt")
+set(PROJECT_NAME "ismallpte")
 
 file(GLOB_RECURSE PROJECT_SOURCES *.c *.cpp)
 file(GLOB_RECURSE PROJECT_HEADERS *.h)

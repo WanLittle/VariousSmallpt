@@ -3,8 +3,8 @@
 #include <stdio.h>
 
 
-double PI = 3.1415926;
-
+const double PI = 3.1415926;
+const double ONE_PI = 1.0 / PI;
 
 // 产生 0-1 的随机数
 double erand48(unsigned short xsubi[3]) 
@@ -76,26 +76,28 @@ struct Sphere
   
 };
 
-
 // 场景（由很多球组成） 
 Sphere spheres[] = {
-  //球: 半径, 位置, 自发光, 颜色, 材质
-  Sphere(1e5, Vec( 1e5+1,40.8,81.6), Vec(),Vec(.75,.25,.25),DIFF),//Left
-  Sphere(1e5, Vec(-1e5+99,40.8,81.6),Vec(),Vec(.25,.25,.75),DIFF),//Rght
-  Sphere(1e5, Vec(50,40.8, 1e5),     Vec(),Vec(.75,.75,.75),DIFF),//Back
-  Sphere(1e5, Vec(50,40.8,-1e5+170), Vec(),Vec(),           DIFF),//Frnt
-  Sphere(1e5, Vec(50, 1e5, 81.6),    Vec(),Vec(.75,.75,.75),DIFF),//Botm
-  Sphere(1e5, Vec(50,-1e5+81.6,81.6),Vec(),Vec(.75,.75,.75),DIFF),//Top
-  Sphere(16.5,Vec(27,16.5,47),       Vec(),Vec(1,1,1)*.999, SPEC),//Mirr
-  Sphere(16.5,Vec(73,16.5,78),       Vec(),Vec(1,1,1)*.999, REFR),//Glas
-  Sphere(600, Vec(50,681.6-.27,81.6),Vec(12,12,12),  Vec(), DIFF) //Lite
+    //球: 半径, 位置, 自发光, 颜色, 材质
+    Sphere(1e5, Vec(1e5 + 1,40.8,81.6), Vec(),Vec(.75,.25,.25),DIFF),//Left
+    Sphere(1e5, Vec(-1e5 + 99,40.8,81.6),Vec(),Vec(.25,.25,.75),DIFF),//Rght
+    Sphere(1e5, Vec(50,40.8, 1e5),     Vec(),Vec(.75,.75,.75),DIFF),//Back
+    Sphere(1e5, Vec(50,40.8,-1e5 + 170), Vec(),Vec(),           DIFF),//Frnt
+    Sphere(1e5, Vec(50, 1e5, 81.6),    Vec(),Vec(.75,.75,.75),DIFF),//Botm
+    Sphere(1e5, Vec(50,-1e5 + 81.6,81.6),Vec(),Vec(.75,.75,.75),DIFF),//Top
+    Sphere(16.5,Vec(27,16.5,47),       Vec(),Vec(1,1,1)*.999, SPEC),//Mirr
+    Sphere(16.5,Vec(73,16.5,78),       Vec(),Vec(1,1,1)*.999, REFR),//Glas
+    Sphere(600, Vec(50,681.6 - .27,81.6),Vec(12,12,12),  Vec(), DIFF) //Lite
 };
 
+// 球的个数
+int numSpheres = sizeof(spheres) / sizeof(Sphere);
+
 // 约束到 0-1 
-inline double clamp(double x) { return x<0 ? 0 : x>1 ? 1 : x; }
+inline double clamp(double x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
 
 // 颜色值转成0-255，其中1/2.2是gamma校正 
-inline int toInt(double x) { return int(pow(clamp(x),1/2.2) * 255 + .5); }
+inline int toInt(double x) { return int(pow(clamp(x), 1 / 2.2) * 255 + 0.5); }
 
 // 遍历场景中的球，找到射线撞击到的那个
 inline bool intersect (const Ray &r, double &t, int &id) 
@@ -114,7 +116,7 @@ inline bool intersect (const Ray &r, double &t, int &id)
 
 
 // 计算辐射率
-Vec radiance(const Ray &r, int depth, unsigned short *Xi) 
+Vec radiance(const Ray &r, int depth, unsigned short *Xi, int E = 1) 
 {
     double t; // 交点 t
     int index = 0; // 相交物体的索引
@@ -134,7 +136,7 @@ Vec radiance(const Ray &r, int depth, unsigned short *Xi)
         if (erand48(Xi) < p) // 俄罗斯轮盘（Russian Roulette）
             f = f * (1 / p);
         else 
-            return obj.emi; // 结束递归，返回物体的自发光
+            return obj.emi * E; // 结束递归，返回物体的自发光
     }
 
     if (obj.reflType == DIFF) // 理想漫反射
@@ -147,7 +149,37 @@ Vec radiance(const Ray &r, int depth, unsigned short *Xi)
         double r2 = erand48(Xi), r2s=sqrt(r2); // 采样随机距离
         Vec d = ( u * cos(r1) * r2s + v * sin(r1) * r2s + w * sqrt(1 - r2) ).norm(); // 采样半球
 
-        return obj.emi + f.mult( radiance(Ray(inter,d),depth,Xi) );
+        // 遍历所有的光源
+        Vec emi;
+        for (int i = 0; i < numSpheres; i++) 
+        {
+            const Sphere &sphe = spheres[i];
+            if (sphe.emi.x <= 0 && sphe.emi.y <= 0 && sphe.emi.z <= 0) // 略过没有自发光的非光源
+                continue;
+
+            // 构建坐标系
+            Vec sw = sphe.pos - inter;
+            Vec su = ((fabs(sw.x) > 0.1 ? Vec(0, 1) : Vec(1)) % sw).norm();
+            Vec sv = sw % su;
+
+            // 在球表示的光源上采样
+            double cos_a_max = sqrt(1 - sphe.rad * sphe.rad / (inter - sphe.pos).dot(inter - sphe.pos));
+            double eps1 = erand48(Xi), eps2 = erand48(Xi);
+            double cos_a = 1 - eps1 + eps1 * cos_a_max;
+            double sin_a = sqrt(1 - cos_a * cos_a);
+            double phi = 2 * PI * eps2;
+            Vec inte2light = su * cos(phi) * sin_a + sv * sin(phi) * sin_a + sw * cos_a;
+            inte2light.norm();
+
+            // 发射阴影光线（shadow ray）
+            if (intersect(Ray(inter, inte2light), t, index) && index == i)
+            {
+                double omega = 2 * PI * (1 - cos_a_max);
+                emi = emi + f.mult(sphe.emi * inte2light.dot(nl) * omega) * ONE_PI;  // Lambertian 漫反射
+            }
+        }
+
+        return obj.emi + emi + f.mult( radiance(Ray(inter,d), depth, Xi, 0) );
     } 
     else if (obj.reflType == SPEC) // 理想镜面反射
     {
@@ -225,7 +257,7 @@ int main(int argc, char *argv[])
     }
 
     // 结果输出到 PPM 文件中
-    FILE *f = fopen("ismallpt.ppm", "w");
+    FILE *f = fopen("ismallpte.ppm", "w");
     fprintf(f, "P3\n%d %d\n%d\n", w, h, 255);
     for (int i = 0; i < w*h; i++)
     {
