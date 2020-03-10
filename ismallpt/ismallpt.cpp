@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "svpng.inc"
 
 double PI = 3.1415926;
 
@@ -196,8 +197,9 @@ int main(int argc, char *argv[])
     Vec cy = (cx % cam.d).norm() * 0.5135;
 
     Vec r;
-    Vec *color = new Vec[w * h]; // 保存图像
+    unsigned char *img = new unsigned char[w * h * 3]; // 保存图像
 
+    int k = 0;
 #pragma omp parallel for schedule(dynamic, 1) private(r) // CPU并行：OpenMP
     for (int y = 0; y < h; y++) // 遍历图像行
     {
@@ -205,7 +207,8 @@ int main(int argc, char *argv[])
         unsigned short Xi[3] = { 0, 0, y * y * y };
         for (unsigned short x = 0; x < w; x++)   // 遍历图像列
         {
-            int i = (h - y - 1) * w + x; // 计算当前像素位置
+            Vec color;
+            int inde = (h - y - 1) * w + x; // 计算当前像素位置
             for (int sy = 0; sy < 2; sy++)     // 遍历 2 x 2 子像素 行
             {
                 for (int sx = 0; sx < 2; sx++, r = Vec()) // 遍历 2 x 2 子像素 列
@@ -216,20 +219,18 @@ int main(int argc, char *argv[])
                         double r2 = 2 * erand48(Xi), dy = r2 < 1 ? sqrt(r2) - 1 : 1 - sqrt(2 - r2);
                         Vec d = cx * (((sx + .5 + dx) / 2 + x) / w - .5) +
                             cy * (((sy + .5 + dy) / 2 + y) / h - .5) + cam.d;
-                        r = r + radiance(Ray(cam.o + d * 140, d.norm()), 0, Xi) * (1. / samps);
+                        r = r + radiance(Ray(cam.o + d * 140, d.norm()), 0, Xi) * (1.0 / samps);
                     }
-                    color[i] = color[i] + Vec(clamp(r.x), clamp(r.y), clamp(r.z)) * .25;
+                    color = color + Vec(clamp(r.x), clamp(r.y), clamp(r.z)) * 0.25;
                 }
             }
+            img[inde * 3 + 0] = unsigned char(toInt(color.x)); // r
+            img[inde * 3 + 1] = unsigned char(toInt(color.y)); // g
+            img[inde * 3 + 2] = unsigned char(toInt(color.z)); // b
         }
     }
 
     // 结果输出到 PPM 文件中
-    FILE *f = fopen("ismallpt.ppm", "w");
-    fprintf(f, "P3\n%d %d\n%d\n", w, h, 255);
-    for (int i = 0; i < w*h; i++)
-    {
-        fprintf(f, "%d %d %d ", toInt(color[i].x), toInt(color[i].y), toInt(color[i].z));
-    }
-
+    svpng(fopen("ismallpt.png", "wb"), w, h, img, 0); // 将结果输出到png图片中
+    delete[] img;
 }
